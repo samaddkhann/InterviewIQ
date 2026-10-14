@@ -55,7 +55,7 @@ function Step2Interview({ interviewData, onFinish }) {
         return;
       }
 
-      // Try known female voices first
+      // Try known female voices 
       const femaleVoice =
         voices.find(v =>
           v.name.toLowerCase().includes("zira") ||
@@ -71,7 +71,7 @@ function Step2Interview({ interviewData, onFinish }) {
 
       // Fallback: first voice (assume female)
       setSelectedVoice(voices[0]);
-      setVoiceGender("female");
+      setVoiceGender("male");
     };
 
     loadVoices();
@@ -79,7 +79,7 @@ function Step2Interview({ interviewData, onFinish }) {
 
   }, [])
 
-  const videoSource = voiceGender === "female" ? maleVideo : femaleVideo;
+  const videoSource = voiceGender === "male" ? maleVideo : femaleVideo;
 
 
   /* ---------------- SPEAK FUNCTION ---------------- */
