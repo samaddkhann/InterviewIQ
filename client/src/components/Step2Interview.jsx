@@ -36,54 +36,65 @@ function Step2Interview({ interviewData, onFinish }) {
   const currentQuestion = questions[currentIndex];
 
 
-  useEffect(() => {
+    useEffect(() => {
+    if (!window.speechSynthesis) return;
+
+    // Best names first. The old check used includes("male"), which also matched "female".
+    // These match whole words only, so "Female" no longer counts as male.
+    const MALE_ORDER = ["david", "mark", "alex", "daniel", "google uk english male", "guy", "ryan", "aaron", "tom", "male"];
+    const FEMALE_ORDER = ["zira", "samantha", "google uk english female", "aria", "jenny", "karen", "susan", "hazel", "female"];
+
+    const findByNames = (voices, names) => {
+      for (const name of names) {
+        const regex = new RegExp("\\b" + name + "\\b", "i");
+        const found = voices.find((v) => regex.test(v.name));
+        if (found) return found;
+      }
+      return null;
+    };
+
+    const pick = (voice, gender) => {
+      // keep the same voice if it is already selected, so the intro does not restart
+      setSelectedVoice((prev) => (prev && prev.voiceURI === voice.voiceURI ? prev : voice));
+      setVoiceGender(gender);
+    };
+
     const loadVoices = () => {
-      const voices = window.speechSynthesis.getVoices();
-      if (!voices.length) return;
+      const all = window.speechSynthesis.getVoices();
+      if (!all.length) return;
 
-      // Try known male voices
-      const maleVoice =
-        voices.find(v =>
-          v.name.toLowerCase().includes("david") ||
-          v.name.toLowerCase().includes("mark") ||
-          v.name.toLowerCase().includes("male")
-        );
+      // English voices only, so English text is not read by another language's voice
+      const english = all.filter((v) => (v.lang || "").toLowerCase().startsWith("en"));
+      const voices = english.length ? english : all;
 
-      if (maleVoice) {
-        setSelectedVoice(maleVoice);
-        setVoiceGender("male");
-        return;
-      }
+      const maleVoice = findByNames(voices, MALE_ORDER);
+      if (maleVoice) return pick(maleVoice, "male");
 
-      // Try known female voices 
-      const femaleVoice =
-        voices.find(v =>
-          v.name.toLowerCase().includes("zira") ||
-          v.name.toLowerCase().includes("samantha") ||
-          v.name.toLowerCase().includes("female")
-        );
+      const femaleVoice = findByNames(voices, FEMALE_ORDER);
+      if (femaleVoice) return pick(femaleVoice, "female");
 
-      if (femaleVoice) {
-        setSelectedVoice(femaleVoice);
-        setVoiceGender("female");
-        return;
-      }
-
-      // Fallback: first voice (assume female)
-      setSelectedVoice(voices[0]);
-      setVoiceGender("male");
+      pick(voices[0], "female");
     };
 
     loadVoices();
     window.speechSynthesis.onvoiceschanged = loadVoices;
 
+    // Some phones never report any voice. After 2 seconds go on with the phone's default voice.
+    const guard = setTimeout(() => {
+      setSelectedVoice((prev) => prev || { fallback: true, voiceURI: "default", name: "default", lang: "en-US" });
+    }, 2000);
+
+    return () => {
+      clearTimeout(guard);
+      window.speechSynthesis.onvoiceschanged = null;
+    };
   }, [])
 
   const videoSource = voiceGender === "male" ? maleVideo : femaleVideo;
 
 
   /* ---------------- SPEAK FUNCTION ---------------- */
-  const speakText = (text) => {
+    const speakText = (text) => {
     return new Promise((resolve) => {
       if (!window.speechSynthesis || !selectedVoice) {
         resolve();
@@ -99,36 +110,57 @@ function Step2Interview({ interviewData, onFinish }) {
 
       const utterance = new SpeechSynthesisUtterance(humanText);
 
-      utterance.voice = selectedVoice;
+      if (!selectedVoice.fallback) utterance.voice = selectedVoice;
+      utterance.lang = selectedVoice.lang || "en-US";
 
       // Human-like pacing
       utterance.rate = 0.92;     // slightly slower than normal
       utterance.pitch = 1.05;    // small warmth
       utterance.volume = 1;
 
+      // Some phones block speech until the user taps. If it never starts,
+      // move on instead of freezing the interview.
+      let done = false;
+      let startGuard = null;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(startGuard);
+        resolve();
+      };
+      startGuard = setTimeout(() => {
+        if (!window.speechSynthesis.speaking) {
+          setIsAIPlaying(false);
+          setSubtitle("");
+          finish();
+        }
+      }, 4000);
+
       utterance.onstart = () => {
         setIsAIPlaying(true);
         stopMic()
-        videoRef.current?.play();
+        videoRef.current?.play()?.catch(() => { });
       };
-
 
       utterance.onend = () => {
         videoRef.current?.pause();
-        videoRef.current.currentTime = 0;
+        if (videoRef.current) videoRef.current.currentTime = 0;
         setIsAIPlaying(false);
-
-
 
         if (isMicOn) {
           startMic();
         }
         setTimeout(() => {
           setSubtitle("");
-          resolve();
+          finish();
         }, 300);
       };
 
+      utterance.onerror = (e) => {
+        if (e.error === "canceled" || e.error === "interrupted") return;
+        setIsAIPlaying(false);
+        finish();
+      };
 
       setSubtitle(text);
 
