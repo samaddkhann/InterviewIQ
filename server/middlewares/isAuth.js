@@ -1,27 +1,26 @@
 import jwt from "jsonwebtoken"
 
+// Accepts the token from the Authorization header (Safari, iPhone) or from the cookie (other browsers)
+const isAuth = (req, res, next) => {
+    const header = req.headers.authorization || ""
+    const headerToken = header.startsWith("Bearer ") ? header.slice(7).trim() : ""
+    const tokens = [headerToken, req.cookies?.token].filter(Boolean)
 
-const isAuth = async (req,res,next) => {
-    try {
-        let {token} = req.cookies
-
-        if(!token){
-            return res.status(400).json({message:"user does not have a token"})
-        }
-        const verifyToken = jwt.verify(token , process.env.JWT_SECRET)
-        
-        if(!verifyToken){
-            return res.status(400).json({message:"user does not have a valid token"})
-        }
-        req.userId = verifyToken.userId
-
-        next()
-   
-
-    } catch (error) {
-        return res.status(500).json({message:`isAuth error ${error}`})
+    if (tokens.length === 0) {
+        return res.status(401).json({ message: "user does not have a token" })
     }
-    
+
+    for (const token of tokens) {
+        try {
+            const verified = jwt.verify(token, process.env.JWT_SECRET)
+            req.userId = verified.userId
+            return next()
+        } catch (error) {
+            // this one was invalid or expired, try the next one
+        }
+    }
+
+    return res.status(401).json({ message: "user does not have a valid token" })
 }
 
 export default isAuth
